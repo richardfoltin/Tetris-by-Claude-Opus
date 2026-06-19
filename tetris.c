@@ -71,6 +71,7 @@ uint32_t rng_next(Game *g);
 int      rng_range(Game *g, int n);
 void     bag_refill(Game *g);
 int      bag_pop(Game *g);
+void     shape_cells(int type, int rot, int out[4][2]);
 
 /* (more declarations are added as tasks introduce functions) */
 
@@ -107,6 +108,40 @@ void bag_refill(Game *g) {
 int bag_pop(Game *g) {
     if (g->bag_idx >= 7) bag_refill(g);
     return g->bag[g->bag_idx++];
+}
+
+/* ===== Tetromino shapes + rotation ===== */
+
+/* Base spawn orientations in a 4x4 box, row-major, '#' = filled.
+ * Order matches color ids: I,O,T,S,Z,J,L (index 0..6). */
+static const char *BASE_SHAPE[7] = {
+    "...." "####" "...." "....",   /* I */
+    ".##." ".##." "...." "....",   /* O */
+    ".#.." "###." "...." "....",   /* T */
+    ".##." "##.." "...." "....",   /* S */
+    "##.." ".##." "...." "....",   /* Z */
+    "#..." "###." "...." "....",   /* J */
+    "..#." "###." "...." "...."    /* L */
+};
+
+void shape_cells(int type, int rot, int out[4][2]) {
+    int grid[4][4], r, c, k, n = 0;
+    const char *s = BASE_SHAPE[type];
+    for (r = 0; r < 4; r++)
+        for (c = 0; c < 4; c++)
+            grid[r][c] = (s[r * 4 + c] == '#');
+    for (k = 0; k < (rot & 3); k++) {       /* clockwise rotation */
+        int tmp[4][4];
+        for (r = 0; r < 4; r++)
+            for (c = 0; c < 4; c++)
+                tmp[r][c] = grid[3 - c][r];
+        for (r = 0; r < 4; r++)
+            for (c = 0; c < 4; c++)
+                grid[r][c] = tmp[r][c];
+    }
+    for (r = 0; r < 4; r++)
+        for (c = 0; c < 4; c++)
+            if (grid[r][c]) { out[n][0] = r; out[n][1] = c; n++; }
 }
 
 #ifndef UNIT_TEST
@@ -168,6 +203,46 @@ static void test_rng(void) {
     CHECK(rng_next(&a) != 0u);
 }
 
+static int has_cell(int cells[4][2], int n, int r, int c) {
+    int i;
+    for (i = 0; i < n; i++) if (cells[i][0] == r && cells[i][1] == c) return 1;
+    return 0;
+}
+
+static void test_shapes(void) {
+    int cells[4][2];
+
+    /* I spawn: row 1, cols 0..3 */
+    shape_cells(0, 0, cells);
+    CHECK(has_cell(cells, 4, 1, 0) && has_cell(cells, 4, 1, 1) &&
+          has_cell(cells, 4, 1, 2) && has_cell(cells, 4, 1, 3));
+
+    /* I rotated once: column 2, rows 0..3 */
+    shape_cells(0, 1, cells);
+    CHECK(has_cell(cells, 4, 0, 2) && has_cell(cells, 4, 1, 2) &&
+          has_cell(cells, 4, 2, 2) && has_cell(cells, 4, 3, 2));
+
+    /* O spawn: 2x2 at rows 0..1, cols 1..2 */
+    shape_cells(1, 0, cells);
+    CHECK(has_cell(cells, 4, 0, 1) && has_cell(cells, 4, 0, 2) &&
+          has_cell(cells, 4, 1, 1) && has_cell(cells, 4, 1, 2));
+
+    /* T spawn: (0,1),(1,0),(1,1),(1,2) */
+    shape_cells(2, 0, cells);
+    CHECK(has_cell(cells, 4, 0, 1) && has_cell(cells, 4, 1, 0) &&
+          has_cell(cells, 4, 1, 1) && has_cell(cells, 4, 1, 2));
+
+    /* rot is taken mod 4: rot 4 == rot 0 for any piece */
+    {
+        int a[4][2], b[4][2], i, same = 1;
+        shape_cells(5, 0, a);
+        shape_cells(5, 4, b);
+        for (i = 0; i < 4; i++)
+            if (!has_cell(b, 4, a[i][0], a[i][1])) same = 0;
+        CHECK(same);
+    }
+}
+
 static void test_harness(void) {
     CHECK(1 == 1);
 }
@@ -175,6 +250,7 @@ static void test_harness(void) {
 int main(void) {
     test_bag();
     test_rng();
+    test_shapes();
     test_harness();
     printf("\n%d checks, %d failures\n", g_tests, g_fails);
     return g_fails ? 1 : 0;
