@@ -444,6 +444,26 @@ void save_highscore(const char *path, long score) {
  * Task 12 adds read_key/sleep_ms here; Task 13 adds the renderer here;
  * both ABOVE the main() below. Task 14 replaces this placeholder main body. */
 
+#ifdef USE_CLS
+  #define ESC(s) ""
+  static void clr_home(void) { system("cls"); }
+#else
+  #define ESC(s) s
+  static void clr_home(void) { fputs("\033[H", stdout); }
+#endif
+
+/* ANSI 256-color foreground per cell color id (1..7). */
+static const char *CELL_COLOR[8] = {
+    "",
+    ESC("\033[38;5;51m"),    /* I cyan    */
+    ESC("\033[38;5;226m"),   /* O yellow  */
+    ESC("\033[38;5;201m"),   /* T magenta */
+    ESC("\033[38;5;46m"),    /* S green   */
+    ESC("\033[38;5;196m"),   /* Z red     */
+    ESC("\033[38;5;33m"),    /* J blue    */
+    ESC("\033[38;5;208m")    /* L orange  */
+};
+
 void sleep_ms(int ms) {
     Sleep((DWORD)ms);
 }
@@ -475,6 +495,105 @@ int read_key(void) {
         case '3':           return KEY_PU3;
         default:            return KEY_NONE;
     }
+}
+
+static void print_cell(int v) {
+    switch (v) {
+        case 0:  fputs("  ", stdout); break;                       /* empty */
+        case 8:  fputs(ESC("\033[91m") "()" ESC("\033[0m"), stdout); break; /* bomb  */
+        case 9:  fputs(ESC("\033[96m") "<>" ESC("\033[0m"), stdout); break; /* laser */
+        case 10: fputs(ESC("\033[90m") "::" ESC("\033[0m"), stdout); break; /* ghost */
+        default: printf("%s[]%s", CELL_COLOR[v], ESC("\033[0m")); break;
+    }
+}
+
+static const char *PU_NAME(int pu) {
+    switch (pu) {
+        case PU_SLOWMO: return "Lassitas";
+        case PU_NUKE:   return "Sortorlo";
+        case PU_SWAP:   return "Csere";
+        default:        return "-";
+    }
+}
+
+void render_init(void) {
+    fputs(ESC("\033[2J\033[?25l"), stdout);   /* clear screen + hide cursor */
+}
+
+void render_cleanup(void) {
+    fputs(ESC("\033[?25h\033[0m"), stdout);   /* show cursor + reset */
+    fputc('\n', stdout);
+}
+
+void render(const Game *g) {
+    int buf[BOARD_H][BOARD_W];
+    int cells[4][2], n, i, r, c;
+    Piece ghost;
+
+    /* base grid */
+    for (r = 0; r < BOARD_H; r++)
+        for (c = 0; c < BOARD_W; c++)
+            buf[r][c] = g->grid[r][c];
+
+    /* ghost: drop a copy until it would collide */
+    ghost = g->cur;
+    for (;;) {
+        Piece t = ghost; t.r += 1;
+        if (collides(g, &t)) break;
+        ghost = t;
+    }
+    piece_cells(&ghost, cells, &n);
+    for (i = 0; i < n; i++) {
+        r = cells[i][0]; c = cells[i][1];
+        if (r >= 0 && r < BOARD_H && c >= 0 && c < BOARD_W && buf[r][c] == 0)
+            buf[r][c] = 10;
+    }
+
+    /* current piece on top */
+    piece_cells(&g->cur, cells, &n);
+    for (i = 0; i < n; i++) {
+        r = cells[i][0]; c = cells[i][1];
+        if (r >= 0 && r < BOARD_H && c >= 0 && c < BOARD_W) {
+            if (g->cur.special == 1)      buf[r][c] = 8;
+            else if (g->cur.special == 2) buf[r][c] = 9;
+            else                          buf[r][c] = g->cur.type + 1;
+        }
+    }
+
+    clr_home();
+    printf("  TETRIS+   pont:%ld  csucs:%ld  szint:%d  sorok:%d" ESC("\033[K") "\n",
+           g->score, (g->highscore > g->score ? g->highscore : g->score),
+           g->level, g->lines);
+    printf("  +"); for (c = 0; c < BOARD_W; c++) fputs("--", stdout);
+    printf("+" ESC("\033[K") "\n");
+
+    for (r = 0; r < BOARD_H; r++) {
+        fputs("  |", stdout);
+        for (c = 0; c < BOARD_W; c++) print_cell(buf[r][c]);
+        fputs("|", stdout);
+
+        /* side panel */
+        if (r == 0) printf("   kovetkezo: %c", "IOTSZJL"[g->next_type]);
+        else if (r == 2) printf("   toltes: %d/%d", g->charge, CHARGE_PER_POWERUP);
+        else if (r == 4) printf("   keszlet:");
+        else if (r == 5) printf("     1:%s", g->inv_count > 0 ? PU_NAME(g->inv[0]) : "-");
+        else if (r == 6) printf("     2:%s", g->inv_count > 1 ? PU_NAME(g->inv[1]) : "-");
+        else if (r == 7) printf("     3:%s", g->inv_count > 2 ? PU_NAME(g->inv[2]) : "-");
+        else if (r == 9 && g->slowmo_ms_left > 0) printf("   [LASSITAS]");
+        else if (r == 12) printf("   mozgas: <- -> / A D");
+        else if (r == 13) printf("   forgat: ^ / W");
+        else if (r == 14) printf("   ejt:    SPACE");
+        else if (r == 15) printf("   power:  1 2 3");
+        else if (r == 16) printf("   szunet: P   kilep: Q");
+        printf(ESC("\033[K") "\n");
+    }
+    printf("  +"); for (c = 0; c < BOARD_W; c++) fputs("--", stdout);
+    printf("+" ESC("\033[K") "\n");
+
+    if (g->paused)    printf("  ** SZUNET (P a folytatashoz) **" ESC("\033[K") "\n");
+    if (g->game_over) printf("  ** VEGE! pont: %ld - Q a kilepeshez **" ESC("\033[K") "\n",
+                             g->score);
+    fflush(stdout);
 }
 
 int main(void) {
