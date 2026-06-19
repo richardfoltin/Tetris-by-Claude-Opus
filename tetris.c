@@ -72,6 +72,25 @@ int      rng_range(Game *g, int n);
 
 /* (more declarations are added as tasks introduce functions) */
 
+/* ===== PRNG (xorshift32) ===== */
+void rng_seed(Game *g, uint32_t seed) {
+    g->rng = seed ? seed : 0xC0FFEEu;   /* avoid the zero fixed point */
+}
+
+uint32_t rng_next(Game *g) {
+    uint32_t x = g->rng;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    g->rng = x;
+    return x;
+}
+
+int rng_range(Game *g, int n) {
+    if (n <= 0) return 0;
+    return (int)(rng_next(g) % (uint32_t)n);
+}
+
 #ifndef UNIT_TEST
 /* ===== interactive I/O + game main (game build only) =====
  * Task 12 adds read_key/sleep_ms here; Task 13 adds the renderer here;
@@ -90,11 +109,33 @@ static int g_tests = 0, g_fails = 0;
         printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);} \
 } while (0)
 
+static void test_rng(void) {
+    Game a, b;
+    rng_seed(&a, 12345u);
+    rng_seed(&b, 12345u);
+    /* deterministic: same seed -> same stream */
+    CHECK(rng_next(&a) == rng_next(&b));
+    CHECK(rng_next(&a) == rng_next(&b));
+    /* range is bounded */
+    {
+        int i, ok = 1;
+        for (i = 0; i < 1000; i++) {
+            int v = rng_range(&a, 7);
+            if (v < 0 || v >= 7) ok = 0;
+        }
+        CHECK(ok);
+    }
+    /* seed 0 must not lock the generator at 0 */
+    rng_seed(&a, 0u);
+    CHECK(rng_next(&a) != 0u);
+}
+
 static void test_harness(void) {
     CHECK(1 == 1);
 }
 
 int main(void) {
+    test_rng();
     test_harness();
     printf("\n%d checks, %d failures\n", g_tests, g_fails);
     return g_fails ? 1 : 0;
