@@ -95,6 +95,7 @@ void     apply_swap(Game *g);
 void     use_powerup(Game *g, int slot);
 long     load_highscore(const char *path);
 void     save_highscore(const char *path, long score);
+void     process_input(Game *g, int key);
 
 /* (more declarations are added as tasks introduce functions) */
 
@@ -292,11 +293,37 @@ int gravity_interval_ms(const Game *g) {
 }
 
 void game_init(Game *g, uint32_t seed) {
-    memset(g, 0, sizeof *g);
+    int r, c, i;
+    for (r = 0; r < BOARD_H; r++)
+        for (c = 0; c < BOARD_W; c++) g->grid[r][c] = 0;
     rng_seed(g, seed);
     g->bag_idx = 7;
+    g->charge = 0;
+    g->inv_count = 0;
+    for (i = 0; i < INVENTORY_SLOTS; i++) g->inv[i] = PU_NONE;
+    g->score = 0; g->lines = 0; g->level = 0;
+    g->slowmo_ms_left = 0;
+    g->game_over = 0; g->paused = 0;
+    g->highscore = 0;
     g->next_type = bag_pop(g);
     spawn_piece(g);
+}
+
+void process_input(Game *g, int key) {
+    if (g->game_over) return;
+    if (key == KEY_PAUSE) { g->paused = !g->paused; return; }
+    if (g->paused) return;
+    switch (key) {
+        case KEY_LEFT:  try_move(g, 0, -1); break;
+        case KEY_RIGHT: try_move(g, 0,  1); break;
+        case KEY_DOWN:  if (!try_move(g, 1, 0)) lock_piece(g); break;
+        case KEY_UP:    try_rotate(g); break;
+        case KEY_DROP:  hard_drop(g);  break;
+        case KEY_PU1:   use_powerup(g, 0); break;
+        case KEY_PU2:   use_powerup(g, 1); break;
+        case KEY_PU3:   use_powerup(g, 2); break;
+        default: break;
+    }
 }
 
 /* ===== Special pieces (bomb, laser) + lock integration ===== */
@@ -756,6 +783,54 @@ static void test_highscore(void) {
     remove(path);
 }
 
+static void test_init_input(void) {
+    Game g;
+    game_init(&g, 42u);
+    CHECK(!g.game_over && !g.paused);
+    CHECK(g.score == 0 && g.lines == 0 && g.level == 0);
+    CHECK(g.inv_count == 0 && g.charge == 0);
+    CHECK(g.cur.type >= 0 && g.cur.type < 7);
+
+    /* left / right move the piece */
+    {
+        int c0 = g.cur.c;
+        process_input(&g, KEY_LEFT);
+        CHECK(g.cur.c == c0 - 1);
+        process_input(&g, KEY_RIGHT);
+        CHECK(g.cur.c == c0);
+    }
+
+    /* pause blocks movement; unpause restores it */
+    process_input(&g, KEY_PAUSE);
+    CHECK(g.paused);
+    {
+        int c0 = g.cur.c;
+        process_input(&g, KEY_LEFT);
+        CHECK(g.cur.c == c0);             /* ignored while paused */
+    }
+    process_input(&g, KEY_PAUSE);
+    CHECK(!g.paused);
+
+    /* soft-drop two rows, then hard drop must lock + respawn at the top */
+    process_input(&g, KEY_DOWN);
+    process_input(&g, KEY_DOWN);
+    CHECK(g.cur.r == 2);
+    process_input(&g, KEY_DROP);
+    CHECK(g.cur.r == 0);             /* r went 2 -> 0, proving a respawn happened */
+
+    /* firing an empty power-up slot is harmless */
+    process_input(&g, KEY_PU1);
+    CHECK(g.inv_count == 0);
+
+    /* no input is processed after game over */
+    g.game_over = 1;
+    {
+        int c0 = g.cur.c;
+        process_input(&g, KEY_LEFT);
+        CHECK(g.cur.c == c0);
+    }
+}
+
 static void test_harness(void) {
     CHECK(1 == 1);
 }
@@ -772,6 +847,7 @@ int main(void) {
     test_special_pieces();
     test_powerups();
     test_highscore();
+    test_init_input();
     test_harness();
     printf("\n%d checks, %d failures\n", g_tests, g_fails);
     return g_fails ? 1 : 0;
