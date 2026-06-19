@@ -1,0 +1,9 @@
+# build artifacts
+*.exe
+*.o
+tetris
+tetris_test
+tetris_cls
+# runtime
+highscore.txt
+test_hs.tmp
