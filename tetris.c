@@ -74,6 +74,8 @@ int      bag_pop(Game *g);
 void     shape_cells(int type, int rot, int out[4][2]);
 void     piece_cells(const Piece *p, int out[4][2], int *count);
 int      collides(const Game *g, const Piece *p);
+int      try_move(Game *g, int dr, int dc);
+int      try_rotate(Game *g);
 
 /* (more declarations are added as tasks introduce functions) */
 
@@ -171,6 +173,29 @@ int collides(const Game *g, const Piece *p) {
         if (cc < 0 || cc >= BOARD_W) return 1;
         if (rr >= BOARD_H)           return 1;
         if (rr >= 0 && g->grid[rr][cc] != 0) return 1;
+    }
+    return 0;
+}
+
+/* ===== Movement + rotation ===== */
+int try_move(Game *g, int dr, int dc) {
+    Piece p = g->cur;
+    p.r += dr; p.c += dc;
+    if (collides(g, &p)) return 0;
+    g->cur = p;
+    return 1;
+}
+
+int try_rotate(Game *g) {
+    static const int kicks[5] = {0, -1, 1, -2, 2};
+    int i;
+    if (g->cur.special) return 0;      /* specials don't rotate */
+    if (g->cur.type == 1) return 0;    /* O rotation is a no-op  */
+    for (i = 0; i < 5; i++) {
+        Piece p = g->cur;
+        p.rot = (p.rot + 1) & 3;
+        p.c += kicks[i];
+        if (!collides(g, &p)) { g->cur = p; return 1; }
     }
     return 0;
 }
@@ -306,6 +331,38 @@ static void test_collision(void) {
     }
 }
 
+static void test_movement(void) {
+    Game g;
+    memset(&g, 0, sizeof g);
+    g.cur.type = 2; g.cur.rot = 0; g.cur.r = 0; g.cur.c = 3; g.cur.special = 0;
+
+    CHECK(try_move(&g, 0, -1));        /* left ok */
+    CHECK(g.cur.c == 2);
+    CHECK(try_move(&g, 0, 1));         /* right ok */
+    CHECK(g.cur.c == 3);
+    CHECK(try_move(&g, 1, 0));         /* down ok */
+    CHECK(g.cur.r == 1);
+
+    /* against the left wall, moving left fails and position is unchanged */
+    g.cur.c = 0; g.cur.r = 0; g.cur.rot = 0;   /* T at col0: leftmost filled col is 0 */
+    CHECK(!try_move(&g, 0, -1));
+    CHECK(g.cur.c == 0);
+
+    /* rotation changes rot (T is not O) */
+    g.cur.type = 2; g.cur.c = 3; g.cur.r = 0; g.cur.rot = 0;
+    CHECK(try_rotate(&g));
+    CHECK(g.cur.rot == 1);
+
+    /* O does not rotate */
+    g.cur.type = 1; g.cur.rot = 0;
+    CHECK(!try_rotate(&g));
+    CHECK(g.cur.rot == 0);
+
+    /* special does not rotate */
+    g.cur.special = 1; g.cur.rot = 0;
+    CHECK(!try_rotate(&g));
+}
+
 static void test_harness(void) {
     CHECK(1 == 1);
 }
@@ -315,6 +372,7 @@ int main(void) {
     test_rng();
     test_shapes();
     test_collision();
+    test_movement();
     test_harness();
     printf("\n%d checks, %d failures\n", g_tests, g_fails);
     return g_fails ? 1 : 0;
