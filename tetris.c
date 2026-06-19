@@ -83,6 +83,11 @@ void     add_lines(Game *g, int n);
 void     spawn_piece(Game *g);
 int      gravity_interval_ms(const Game *g);
 void     game_init(Game *g, uint32_t seed);
+void     apply_bomb(Game *g, int cr, int cc);
+void     apply_laser(Game *g, int cr, int cc);
+void     add_charge(Game *g, int n);
+void     lock_piece(Game *g);
+void     hard_drop(Game *g);
 
 /* (more declarations are added as tasks introduce functions) */
 
@@ -285,6 +290,46 @@ void game_init(Game *g, uint32_t seed) {
     g->bag_idx = 7;
     g->next_type = bag_pop(g);
     spawn_piece(g);
+}
+
+/* ===== Special pieces (bomb, laser) + lock integration ===== */
+void apply_bomb(Game *g, int cr, int cc) {
+    int r, c;
+    for (r = cr - BOMB_RADIUS; r <= cr + BOMB_RADIUS; r++)
+        for (c = cc - BOMB_RADIUS; c <= cc + BOMB_RADIUS; c++)
+            if (r >= 0 && r < BOARD_H && c >= 0 && c < BOARD_W)
+                g->grid[r][c] = 0;
+}
+
+void apply_laser(Game *g, int cr, int cc) {
+    int i;
+    if (cr >= 0 && cr < BOARD_H)
+        for (i = 0; i < BOARD_W; i++) g->grid[cr][i] = 0;
+    if (cc >= 0 && cc < BOARD_W)
+        for (i = 0; i < BOARD_H; i++) g->grid[i][cc] = 0;
+}
+
+/* temporary stub — replaced in Task 9 */
+void add_charge(Game *g, int n) { (void)g; (void)n; }
+
+void lock_piece(Game *g) {
+    int n_cleared;
+    if (g->cur.special) {
+        int cr = g->cur.r + 1, cc = g->cur.c + 1;
+        if (g->cur.special == 1) apply_bomb(g, cr, cc);
+        else                     apply_laser(g, cr, cc);
+    } else {
+        place_piece(g);
+    }
+    n_cleared = clear_lines(g);
+    add_lines(g, n_cleared);
+    add_charge(g, n_cleared);
+    spawn_piece(g);
+}
+
+void hard_drop(Game *g) {
+    while (try_move(g, 1, 0)) { /* fall until blocked */ }
+    lock_piece(g);
 }
 
 #ifndef UNIT_TEST
@@ -539,6 +584,40 @@ static void test_special_spawn(void) {
     CHECK(kinds_ok);                /* special is only ever 0, 1, or 2 */
 }
 
+static void test_special_pieces(void) {
+    Game g;
+    int r, c;
+
+    /* bomb clears a 3x3 around its single cell (r+1,c+1) */
+    memset(&g, 0, sizeof g);
+    rng_seed(&g, 1u); g.bag_idx = 7; g.next_type = bag_pop(&g);
+    for (r = 0; r < BOARD_H; r++)
+        for (c = 0; c < BOARD_W; c++) g.grid[r][c] = 1;
+    apply_bomb(&g, 10, 5);
+    for (r = 9; r <= 11; r++)
+        for (c = 4; c <= 6; c++) CHECK(g.grid[r][c] == 0);
+    CHECK(g.grid[10][7] == 1);                  /* outside blast intact */
+
+    /* laser clears full row + column */
+    memset(&g, 0, sizeof g);
+    for (r = 0; r < BOARD_H; r++)
+        for (c = 0; c < BOARD_W; c++) g.grid[r][c] = 1;
+    apply_laser(&g, 8, 3);
+    for (c = 0; c < BOARD_W; c++) CHECK(g.grid[8][c] == 0);   /* row */
+    for (r = 0; r < BOARD_H; r++) CHECK(g.grid[r][3] == 0);   /* col */
+    CHECK(g.grid[0][0] == 1);                                 /* elsewhere intact */
+
+    /* lock of a bomb piece detonates and then spawns the next piece */
+    memset(&g, 0, sizeof g);
+    rng_seed(&g, 2u); g.bag_idx = 7; g.next_type = bag_pop(&g);
+    for (c = 0; c < BOARD_W; c++) g.grid[BOARD_H-1][c] = 1;   /* full bottom row */
+    g.cur.special = 1; g.cur.type = 0; g.cur.rot = 0;
+    g.cur.r = BOARD_H - 2; g.cur.c = 4;       /* single cell at (H-1, 5) */
+    lock_piece(&g);
+    CHECK(g.grid[BOARD_H-1][5] == 0);          /* blasted */
+    CHECK(g.cur.r == 0 && g.cur.c == 3);       /* a fresh piece spawned at top (RNG-independent) */
+}
+
 static void test_harness(void) {
     CHECK(1 == 1);
 }
@@ -552,6 +631,7 @@ int main(void) {
     test_lines_scoring();
     test_spawn_gravity();
     test_special_spawn();
+    test_special_pieces();
     test_harness();
     printf("\n%d checks, %d failures\n", g_tests, g_fails);
     return g_fails ? 1 : 0;
