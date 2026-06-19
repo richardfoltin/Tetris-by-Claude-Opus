@@ -72,6 +72,8 @@ int      rng_range(Game *g, int n);
 void     bag_refill(Game *g);
 int      bag_pop(Game *g);
 void     shape_cells(int type, int rot, int out[4][2]);
+void     piece_cells(const Piece *p, int out[4][2], int *count);
+int      collides(const Game *g, const Piece *p);
 
 /* (more declarations are added as tasks introduce functions) */
 
@@ -142,6 +144,35 @@ void shape_cells(int type, int rot, int out[4][2]) {
     for (r = 0; r < 4; r++)
         for (c = 0; c < 4; c++)
             if (grid[r][c]) { out[n][0] = r; out[n][1] = c; n++; }
+}
+
+/* ===== Absolute cells + collision ===== */
+void piece_cells(const Piece *p, int out[4][2], int *count) {
+    if (p->special) {
+        out[0][0] = p->r + 1;
+        out[0][1] = p->c + 1;
+        *count = 1;
+    } else {
+        int cells[4][2], i;
+        shape_cells(p->type, p->rot, cells);
+        for (i = 0; i < 4; i++) {
+            out[i][0] = p->r + cells[i][0];
+            out[i][1] = p->c + cells[i][1];
+        }
+        *count = 4;
+    }
+}
+
+int collides(const Game *g, const Piece *p) {
+    int cells[4][2], n, i;
+    piece_cells(p, cells, &n);
+    for (i = 0; i < n; i++) {
+        int rr = cells[i][0], cc = cells[i][1];
+        if (cc < 0 || cc >= BOARD_W) return 1;
+        if (rr >= BOARD_H)           return 1;
+        if (rr >= 0 && g->grid[rr][cc] != 0) return 1;
+    }
+    return 0;
 }
 
 #ifndef UNIT_TEST
@@ -243,6 +274,38 @@ static void test_shapes(void) {
     }
 }
 
+static void test_collision(void) {
+    Game g;
+    Piece p;
+    memset(&g, 0, sizeof g);
+
+    /* normal I at spawn (r=0,c=3) does not collide on an empty board */
+    p.type = 0; p.rot = 0; p.r = 0; p.c = 3; p.special = 0;
+    CHECK(!collides(&g, &p));
+
+    /* push it off the right edge */
+    p.c = BOARD_W;
+    CHECK(collides(&g, &p));
+
+    /* below the floor collides */
+    p.c = 3; p.r = BOARD_H;
+    CHECK(collides(&g, &p));
+
+    /* overlap with a filled cell collides */
+    p.r = 0; p.c = 3;
+    g.grid[1][3] = 5;          /* I at rot0 fills row1 cols3..6 */
+    CHECK(collides(&g, &p));
+
+    /* special piece occupies a single cell at (r+1,c+1) */
+    {
+        int cells[4][2], n;
+        p.special = 1; p.r = 4; p.c = 4;
+        piece_cells(&p, cells, &n);
+        CHECK(n == 1);
+        CHECK(cells[0][0] == 5 && cells[0][1] == 5);
+    }
+}
+
 static void test_harness(void) {
     CHECK(1 == 1);
 }
@@ -251,6 +314,7 @@ int main(void) {
     test_bag();
     test_rng();
     test_shapes();
+    test_collision();
     test_harness();
     printf("\n%d checks, %d failures\n", g_tests, g_fails);
     return g_fails ? 1 : 0;
