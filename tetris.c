@@ -597,7 +597,48 @@ void render(const Game *g) {
 }
 
 int main(void) {
-    return 0;            /* placeholder; replaced by the game loop in Task 14 */
+    Game g;
+    int running = 1, saved = 0;
+    long elapsed = 0;
+
+    game_init(&g, (uint32_t)time(NULL));
+    g.highscore = load_highscore(HIGHSCORE_PATH);
+    render_init();
+
+    while (running) {
+        int key = read_key();
+        if (key == KEY_QUIT) {
+            running = 0;
+        } else if (key != KEY_NONE) {
+            process_input(&g, key);
+        }
+
+        if (!g.paused && !g.game_over) {
+            if (g.slowmo_ms_left > 0) {
+                g.slowmo_ms_left -= FRAME_MS;
+                if (g.slowmo_ms_left < 0) g.slowmo_ms_left = 0;
+            }
+            elapsed += FRAME_MS;
+            if (elapsed >= gravity_interval_ms(&g)) {
+                elapsed = 0;
+                if (!try_move(&g, 1, 0)) lock_piece(&g);
+            }
+        }
+
+        if (g.game_over && !saved) {
+            if (g.score > g.highscore) {
+                g.highscore = g.score;
+                save_highscore(HIGHSCORE_PATH, g.highscore);
+            }
+            saved = 1;
+        }
+
+        render(&g);
+        sleep_ms(FRAME_MS);
+    }
+
+    render_cleanup();
+    return 0;
 }
 #endif /* !UNIT_TEST */
 
