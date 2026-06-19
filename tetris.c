@@ -76,6 +76,10 @@ void     piece_cells(const Piece *p, int out[4][2], int *count);
 int      collides(const Game *g, const Piece *p);
 int      try_move(Game *g, int dr, int dc);
 int      try_rotate(Game *g);
+void     place_piece(Game *g);
+int      clear_lines(Game *g);
+int      score_for_lines(int n, int level);
+void     add_lines(Game *g, int n);
 
 /* (more declarations are added as tasks introduce functions) */
 
@@ -198,6 +202,56 @@ int try_rotate(Game *g) {
         if (!collides(g, &p)) { g->cur = p; return 1; }
     }
     return 0;
+}
+
+/* ===== Locking, line clearing, scoring ===== */
+void place_piece(Game *g) {
+    int cells[4][2], n, i;
+    int color = g->cur.type + 1;
+    piece_cells(&g->cur, cells, &n);
+    for (i = 0; i < n; i++) {
+        int rr = cells[i][0], cc = cells[i][1];
+        if (rr >= 0 && rr < BOARD_H && cc >= 0 && cc < BOARD_W)
+            g->grid[rr][cc] = color;
+    }
+}
+
+int clear_lines(Game *g) {
+    int r, c, w, cleared = 0;
+    for (r = BOARD_H - 1; r >= 0; r--) {
+        int full = 1;
+        for (c = 0; c < BOARD_W; c++)
+            if (g->grid[r][c] == 0) { full = 0; break; }
+        if (full) {
+            int rr;
+            for (rr = r; rr > 0; rr--)
+                for (w = 0; w < BOARD_W; w++)
+                    g->grid[rr][w] = g->grid[rr - 1][w];
+            for (w = 0; w < BOARD_W; w++) g->grid[0][w] = 0;
+            cleared++;
+            r++;                 /* re-check the same row after the shift */
+        }
+    }
+    return cleared;
+}
+
+int score_for_lines(int n, int level) {
+    int base;
+    switch (n) {
+        case 1: base = 40;   break;
+        case 2: base = 100;  break;
+        case 3: base = 300;  break;
+        case 4: base = 1200; break;
+        default: base = 0;   break;
+    }
+    return base * (level + 1);
+}
+
+void add_lines(Game *g, int n) {
+    if (n <= 0) return;
+    g->score += score_for_lines(n, g->level);
+    g->lines += n;
+    g->level = g->lines / LINES_PER_LEVEL;
 }
 
 #ifndef UNIT_TEST
@@ -363,6 +417,46 @@ static void test_movement(void) {
     CHECK(!try_rotate(&g));
 }
 
+static void test_lines_scoring(void) {
+    Game g;
+    int c;
+    memset(&g, 0, sizeof g);
+
+    /* fill the bottom row except one cell, then place a piece to complete it */
+    for (c = 0; c < BOARD_W - 1; c++) g.grid[BOARD_H - 1][c] = 1;
+    CHECK(clear_lines(&g) == 0);                 /* not full yet */
+    g.grid[BOARD_H - 1][BOARD_W - 1] = 1;        /* now full */
+    CHECK(clear_lines(&g) == 1);
+    /* row is gone (empty board again) */
+    {
+        int empty = 1, r;
+        for (r = 0; r < BOARD_H; r++)
+            for (c = 0; c < BOARD_W; c++)
+                if (g.grid[r][c]) empty = 0;
+        CHECK(empty);
+    }
+
+    /* two full rows clear together and content above shifts down */
+    memset(&g, 0, sizeof g);
+    for (c = 0; c < BOARD_W; c++) { g.grid[BOARD_H-1][c] = 1; g.grid[BOARD_H-2][c] = 1; }
+    g.grid[BOARD_H-3][0] = 7;                     /* a marker above */
+    CHECK(clear_lines(&g) == 2);
+    CHECK(g.grid[BOARD_H-1][0] == 7);             /* marker fell to the bottom */
+
+    /* scoring */
+    CHECK(score_for_lines(1, 0) == 40);
+    CHECK(score_for_lines(4, 0) == 1200);
+    CHECK(score_for_lines(2, 1) == 200);         /* 100 * (1+1) */
+
+    /* add_lines updates score/lines/level */
+    memset(&g, 0, sizeof g);
+    add_lines(&g, 4);
+    CHECK(g.score == 1200 && g.lines == 4 && g.level == 0);
+    add_lines(&g, 4);
+    add_lines(&g, 4);
+    CHECK(g.lines == 12 && g.level == 1);        /* 12/10 = 1 */
+}
+
 static void test_harness(void) {
     CHECK(1 == 1);
 }
@@ -373,6 +467,7 @@ int main(void) {
     test_shapes();
     test_collision();
     test_movement();
+    test_lines_scoring();
     test_harness();
     printf("\n%d checks, %d failures\n", g_tests, g_fails);
     return g_fails ? 1 : 0;
