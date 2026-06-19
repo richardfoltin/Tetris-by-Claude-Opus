@@ -69,6 +69,8 @@ typedef struct {
 void     rng_seed(Game *g, uint32_t seed);
 uint32_t rng_next(Game *g);
 int      rng_range(Game *g, int n);
+void     bag_refill(Game *g);
+int      bag_pop(Game *g);
 
 /* (more declarations are added as tasks introduce functions) */
 
@@ -91,6 +93,22 @@ int rng_range(Game *g, int n) {
     return (int)(rng_next(g) % (uint32_t)n);
 }
 
+/* ===== 7-bag piece generator ===== */
+void bag_refill(Game *g) {
+    int i;
+    for (i = 0; i < 7; i++) g->bag[i] = i;
+    for (i = 6; i > 0; i--) {                 /* Fisher-Yates */
+        int j = rng_range(g, i + 1);
+        int tmp = g->bag[i]; g->bag[i] = g->bag[j]; g->bag[j] = tmp;
+    }
+    g->bag_idx = 0;
+}
+
+int bag_pop(Game *g) {
+    if (g->bag_idx >= 7) bag_refill(g);
+    return g->bag[g->bag_idx++];
+}
+
 #ifndef UNIT_TEST
 /* ===== interactive I/O + game main (game build only) =====
  * Task 12 adds read_key/sleep_ms here; Task 13 adds the renderer here;
@@ -108,6 +126,26 @@ static int g_tests = 0, g_fails = 0;
     if (!(cond)) { g_fails++;                                   \
         printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);} \
 } while (0)
+
+static void test_bag(void) {
+    Game g;
+    int seen[7];
+    int i, t;
+    rng_seed(&g, 99u);
+    g.bag_idx = 7;                 /* force refill on first pop */
+    for (i = 0; i < 7; i++) seen[i] = 0;
+    for (i = 0; i < 7; i++) {
+        t = bag_pop(&g);
+        CHECK(t >= 0 && t < 7);
+        seen[t]++;
+    }
+    for (i = 0; i < 7; i++) CHECK(seen[i] == 1);   /* every piece exactly once */
+
+    /* second bag also contains all 7 */
+    for (i = 0; i < 7; i++) seen[i] = 0;
+    for (i = 0; i < 7; i++) seen[bag_pop(&g)]++;
+    for (i = 0; i < 7; i++) CHECK(seen[i] == 1);
+}
 
 static void test_rng(void) {
     Game a, b;
@@ -135,6 +173,7 @@ static void test_harness(void) {
 }
 
 int main(void) {
+    test_bag();
     test_rng();
     test_harness();
     printf("\n%d checks, %d failures\n", g_tests, g_fails);
