@@ -443,6 +443,40 @@ void save_highscore(const char *path, long score) {
 /* ===== interactive I/O + game main (game build only) =====
  * Task 12 adds read_key/sleep_ms here; Task 13 adds the renderer here;
  * both ABOVE the main() below. Task 14 replaces this placeholder main body. */
+
+void sleep_ms(int ms) {
+    Sleep((DWORD)ms);
+}
+
+int read_key(void) {
+    int ch;
+    if (!_kbhit()) return KEY_NONE;
+    ch = _getch();
+    if (ch == 0 || ch == 224) {           /* extended (arrow) key prefix */
+        int code = _getch();
+        switch (code) {
+            case 75: return KEY_LEFT;
+            case 77: return KEY_RIGHT;
+            case 72: return KEY_UP;
+            case 80: return KEY_DOWN;
+            default: return KEY_NONE;
+        }
+    }
+    switch (ch) {
+        case 'a': case 'A': return KEY_LEFT;
+        case 'd': case 'D': return KEY_RIGHT;
+        case 'w': case 'W': return KEY_UP;
+        case 's': case 'S': return KEY_DOWN;
+        case ' ':           return KEY_DROP;
+        case 'p': case 'P': return KEY_PAUSE;
+        case 'q': case 'Q': return KEY_QUIT;
+        case '1':           return KEY_PU1;
+        case '2':           return KEY_PU2;
+        case '3':           return KEY_PU3;
+        default:            return KEY_NONE;
+    }
+}
+
 int main(void) {
     return 0;            /* placeholder; replaced by the game loop in Task 14 */
 }
