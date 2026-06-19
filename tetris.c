@@ -88,6 +88,11 @@ void     apply_laser(Game *g, int cr, int cc);
 void     add_charge(Game *g, int n);
 void     lock_piece(Game *g);
 void     hard_drop(Game *g);
+int      inv_add(Game *g, int pu);
+int      grant_powerup(Game *g);
+void     apply_nuke(Game *g);
+void     apply_swap(Game *g);
+void     use_powerup(Game *g, int slot);
 
 /* (more declarations are added as tasks introduce functions) */
 
@@ -309,8 +314,62 @@ void apply_laser(Game *g, int cr, int cc) {
         for (i = 0; i < BOARD_H; i++) g->grid[i][cc] = 0;
 }
 
-/* temporary stub — replaced in Task 9 */
-void add_charge(Game *g, int n) { (void)g; (void)n; }
+/* ===== Power-up twist — charge meter + inventory ===== */
+int inv_add(Game *g, int pu) {
+    if (g->inv_count >= INVENTORY_SLOTS) return 0;
+    g->inv[g->inv_count++] = pu;
+    return 1;
+}
+
+int grant_powerup(Game *g) {
+    int pu = PU_SLOWMO + rng_range(g, 3);   /* 1..3 */
+    return inv_add(g, pu) ? pu : 0;
+}
+
+void add_charge(Game *g, int lines_cleared) {
+    if (lines_cleared <= 0) return;
+    g->charge += lines_cleared;
+    while (g->charge >= CHARGE_PER_POWERUP) {
+        g->charge -= CHARGE_PER_POWERUP;
+        grant_powerup(g);
+    }
+}
+
+void apply_nuke(Game *g) {
+    int r, c, k;
+    for (k = 0; k < 2; k++) {
+        for (r = BOARD_H - 1; r > 0; r--)
+            for (c = 0; c < BOARD_W; c++)
+                g->grid[r][c] = g->grid[r - 1][c];
+        for (c = 0; c < BOARD_W; c++) g->grid[0][c] = 0;
+    }
+}
+
+void apply_swap(Game *g) {
+    Piece p = g->cur;
+    if (p.special) return;
+    p.type = 0; p.rot = 0;
+    if (collides(g, &p)) {
+        p.r = 0; p.c = 3;
+        if (collides(g, &p)) return;   /* cannot swap right now */
+    }
+    g->cur = p;
+}
+
+void use_powerup(Game *g, int slot) {
+    int pu, i;
+    if (slot < 0 || slot >= g->inv_count) return;
+    pu = g->inv[slot];
+    for (i = slot; i < g->inv_count - 1; i++) g->inv[i] = g->inv[i + 1];
+    g->inv_count--;
+    g->inv[g->inv_count] = PU_NONE;
+    switch (pu) {
+        case PU_SLOWMO: g->slowmo_ms_left = SLOWMO_MS; break;
+        case PU_NUKE:   apply_nuke(g);                 break;
+        case PU_SWAP:   apply_swap(g);                 break;
+        default: break;
+    }
+}
 
 void lock_piece(Game *g) {
     int n_cleared;
@@ -618,6 +677,55 @@ static void test_special_pieces(void) {
     CHECK(g.cur.r == 0 && g.cur.c == 3);       /* a fresh piece spawned at top (RNG-independent) */
 }
 
+static void test_powerups(void) {
+    Game g;
+    int c;
+
+    /* charge meter grants a power-up every CHARGE_PER_POWERUP lines */
+    memset(&g, 0, sizeof g);
+    rng_seed(&g, 3u);
+    add_charge(&g, CHARGE_PER_POWERUP);     /* exactly one threshold */
+    CHECK(g.inv_count == 1);
+    CHECK(g.charge == 0);
+    CHECK(g.inv[0] >= PU_SLOWMO && g.inv[0] <= PU_SWAP);
+
+    /* inventory caps at INVENTORY_SLOTS */
+    memset(&g, 0, sizeof g);
+    rng_seed(&g, 3u);
+    add_charge(&g, CHARGE_PER_POWERUP * 10);
+    CHECK(g.inv_count == INVENTORY_SLOTS);
+
+    /* slow-mo sets the timer */
+    memset(&g, 0, sizeof g);
+    g.inv_count = 1; g.inv[0] = PU_SLOWMO;
+    use_powerup(&g, 0);
+    CHECK(g.slowmo_ms_left == SLOWMO_MS);
+    CHECK(g.inv_count == 0);
+
+    /* nuke clears the bottom two rows and shifts down */
+    memset(&g, 0, sizeof g);
+    for (c = 0; c < BOARD_W; c++) {
+        g.grid[BOARD_H-1][c] = 1; g.grid[BOARD_H-2][c] = 2;
+    }
+    g.grid[BOARD_H-3][0] = 7;
+    g.inv_count = 1; g.inv[0] = PU_NUKE;
+    use_powerup(&g, 0);
+    CHECK(g.grid[BOARD_H-1][0] == 7);           /* marker dropped 2 rows */
+    CHECK(g.grid[BOARD_H-2][1] == 0);
+
+    /* swap turns the current piece into an I */
+    memset(&g, 0, sizeof g);
+    g.cur.type = 5; g.cur.rot = 0; g.cur.r = 0; g.cur.c = 3; g.cur.special = 0;
+    g.inv_count = 1; g.inv[0] = PU_SWAP;
+    use_powerup(&g, 0);
+    CHECK(g.cur.type == 0);
+
+    /* using an empty slot is a no-op */
+    memset(&g, 0, sizeof g);
+    use_powerup(&g, 0);
+    CHECK(g.inv_count == 0);
+}
+
 static void test_harness(void) {
     CHECK(1 == 1);
 }
@@ -632,6 +740,7 @@ int main(void) {
     test_spawn_gravity();
     test_special_spawn();
     test_special_pieces();
+    test_powerups();
     test_harness();
     printf("\n%d checks, %d failures\n", g_tests, g_fails);
     return g_fails ? 1 : 0;
