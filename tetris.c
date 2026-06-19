@@ -80,6 +80,9 @@ void     place_piece(Game *g);
 int      clear_lines(Game *g);
 int      score_for_lines(int n, int level);
 void     add_lines(Game *g, int n);
+void     spawn_piece(Game *g);
+int      gravity_interval_ms(const Game *g);
+void     game_init(Game *g, uint32_t seed);
 
 /* (more declarations are added as tasks introduce functions) */
 
@@ -252,6 +255,36 @@ void add_lines(Game *g, int n) {
     g->score += score_for_lines(n, g->level);
     g->lines += n;
     g->level = g->lines / LINES_PER_LEVEL;
+}
+
+/* ===== Spawn, game-over, gravity interval ===== */
+void spawn_piece(Game *g) {
+    Piece p;
+    p.type = g->next_type;
+    p.rot = 0;
+    p.r = 0; p.c = 3;
+    p.special = 0;
+    if (rng_range(g, 100) < SPECIAL_CHANCE)
+        p.special = 1 + rng_range(g, 2);   /* 1 bomb, 2 laser */
+    g->next_type = bag_pop(g);
+    g->cur = p;
+    if (collides(g, &g->cur)) g->game_over = 1;
+}
+
+int gravity_interval_ms(const Game *g) {
+    int base = START_INTERVAL_MS - g->level * LEVEL_STEP_MS;
+    if (base < MIN_INTERVAL_MS) base = MIN_INTERVAL_MS;
+    if (g->slowmo_ms_left > 0)
+        base = base * SLOWMO_FACTOR_NUM / SLOWMO_FACTOR_DEN;
+    return base;
+}
+
+void game_init(Game *g, uint32_t seed) {
+    memset(g, 0, sizeof *g);
+    rng_seed(g, seed);
+    g->bag_idx = 7;
+    g->next_type = bag_pop(g);
+    spawn_piece(g);
 }
 
 #ifndef UNIT_TEST
@@ -457,6 +490,55 @@ static void test_lines_scoring(void) {
     CHECK(g.lines == 12 && g.level == 1);        /* 12/10 = 1 */
 }
 
+static void test_spawn_gravity(void) {
+    Game g;
+    memset(&g, 0, sizeof g);
+    rng_seed(&g, 7u);
+    g.bag_idx = 7;
+    g.next_type = bag_pop(&g);
+    spawn_piece(&g);
+    CHECK(!g.game_over);
+    CHECK(g.cur.r == 0 && g.cur.c == 3);
+    CHECK(g.cur.type >= 0 && g.cur.type < 7);
+
+    /* fill the top rows so a fresh spawn collides -> game over */
+    memset(&g.grid, 0, sizeof g.grid);
+    {
+        int r, c;
+        for (r = 0; r < 4; r++)
+            for (c = 0; c < BOARD_W; c++) g.grid[r][c] = 1;
+    }
+    g.game_over = 0;
+    spawn_piece(&g);
+    CHECK(g.game_over);
+
+    /* gravity interval: faster with level, floored, slower under slow-mo */
+    memset(&g, 0, sizeof g);
+    g.level = 0; g.slowmo_ms_left = 0;
+    CHECK(gravity_interval_ms(&g) == START_INTERVAL_MS);
+    g.level = 100;                                  /* would go negative -> floored */
+    CHECK(gravity_interval_ms(&g) == MIN_INTERVAL_MS);
+    g.level = 0; g.slowmo_ms_left = 500;
+    CHECK(gravity_interval_ms(&g) ==
+          START_INTERVAL_MS * SLOWMO_FACTOR_NUM / SLOWMO_FACTOR_DEN);
+}
+
+/* The headline twist: spawn_piece must actually roll special pieces. */
+static void test_special_spawn(void) {
+    Game g;
+    int i, saw_normal = 0, saw_special = 0, kinds_ok = 1;
+    game_init(&g, 1234u);
+    for (i = 0; i < 400; i++) {
+        if (g.cur.special == 0) saw_normal = 1; else saw_special = 1;
+        if (g.cur.special < 0 || g.cur.special > 2) kinds_ok = 0;
+        g.game_over = 0;            /* board stays empty; keep spawning */
+        spawn_piece(&g);
+    }
+    CHECK(saw_normal);              /* normal pieces appear            */
+    CHECK(saw_special);             /* ...and special ones (the twist) */
+    CHECK(kinds_ok);                /* special is only ever 0, 1, or 2 */
+}
+
 static void test_harness(void) {
     CHECK(1 == 1);
 }
@@ -468,6 +550,8 @@ int main(void) {
     test_collision();
     test_movement();
     test_lines_scoring();
+    test_spawn_gravity();
+    test_special_spawn();
     test_harness();
     printf("\n%d checks, %d failures\n", g_tests, g_fails);
     return g_fails ? 1 : 0;
