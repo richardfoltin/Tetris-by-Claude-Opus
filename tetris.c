@@ -516,7 +516,25 @@ static const char *PU_NAME(int pu) {
     }
 }
 
+#ifndef USE_CLS
+/* Enable ANSI/VT escape processing so the classic Windows console (conhost)
+ * interprets the color/cursor codes too, not only Windows Terminal. Without
+ * this, older consoles print the escapes literally and the screen scrolls. */
+#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+#endif
+static void enable_vt(void) {
+    HANDLE h = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD mode = 0;
+    if (h != INVALID_HANDLE_VALUE && GetConsoleMode(h, &mode))
+        SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+}
+#endif
+
 void render_init(void) {
+#ifndef USE_CLS
+    enable_vt();                              /* make conhost interpret ANSI */
+#endif
     fputs(ESC("\033[2J\033[?25l"), stdout);   /* clear screen + hide cursor */
 }
 

@@ -14,7 +14,10 @@ Játék:
 gcc -std=c11 -O2 -Wall -Wextra -pedantic -o tetris tetris.c
 ```
 
-Nem VT-képes (régi) konzolhoz, színek nélkül:
+A program induláskor maga kapcsolja be az ANSI/VT-feldolgozást, így a
+klasszikus Windows-konzolban (conhost) és a Windows Terminalban is helyesen
+rajzol. Ha valamiért mégis nyersen látszanának az escape-kódok, fordítsd a
+színek nélküli, `system("cls")`-es tartalék változatot:
 ```
 gcc -std=c11 -O2 -DUSE_CLS -o tetris tetris.c
 ```
@@ -37,4 +40,5 @@ gcc -std=c11 -DUNIT_TEST -Wall -Wextra -pedantic -o tetris_test tetris.c
 | P | szünet |
 | Q | kilépés |
 
-Futtasd Windows Terminalban a helyes ANSI-megjelenítéshez.
+Bármely modern Windows-konzolban fut (a VT-t a program kapcsolja be); a
+Windows Terminal ajánlott a legszebb színekhez.
