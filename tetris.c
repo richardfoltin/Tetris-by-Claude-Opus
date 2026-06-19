@@ -93,6 +93,8 @@ int      grant_powerup(Game *g);
 void     apply_nuke(Game *g);
 void     apply_swap(Game *g);
 void     use_powerup(Game *g, int slot);
+long     load_highscore(const char *path);
+void     save_highscore(const char *path, long score);
 
 /* (more declarations are added as tasks introduce functions) */
 
@@ -389,6 +391,25 @@ void lock_piece(Game *g) {
 void hard_drop(Game *g) {
     while (try_move(g, 1, 0)) { /* fall until blocked */ }
     lock_piece(g);
+}
+
+/* ===== High-score persistence ===== */
+long load_highscore(const char *path) {
+    FILE *f = fopen(path, "r");
+    long v = 0;
+    if (f) {
+        if (fscanf(f, "%ld", &v) != 1) v = 0;
+        fclose(f);
+    }
+    return v;
+}
+
+void save_highscore(const char *path, long score) {
+    FILE *f = fopen(path, "w");
+    if (f) {
+        fprintf(f, "%ld\n", score);
+        fclose(f);
+    }
 }
 
 #ifndef UNIT_TEST
@@ -726,6 +747,15 @@ static void test_powerups(void) {
     CHECK(g.inv_count == 0);
 }
 
+static void test_highscore(void) {
+    const char *path = "test_hs.tmp";
+    remove(path);
+    CHECK(load_highscore(path) == 0);     /* missing file -> 0 */
+    save_highscore(path, 4242);
+    CHECK(load_highscore(path) == 4242);  /* round-trips */
+    remove(path);
+}
+
 static void test_harness(void) {
     CHECK(1 == 1);
 }
@@ -741,6 +771,7 @@ int main(void) {
     test_special_spawn();
     test_special_pieces();
     test_powerups();
+    test_highscore();
     test_harness();
     printf("\n%d checks, %d failures\n", g_tests, g_fails);
     return g_fails ? 1 : 0;
