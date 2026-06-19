@@ -124,7 +124,7 @@ Power-up típusok:
   fölé (nincs teljes törlés → villódzásmentes). Színes blokkok ANSI
   színkódokkal.
 - **Cella-rajz:** 2 karakter/cella, csak ASCII a hordozhatóságért:
-  - üres: `· ` (vagy két szóköz), kitöltött: `[]` az elem színével,
+  - üres: két szóköz (vagy `. ` halvány raszternek), kitöltött: `[]` az elem színével,
   - bomba: `()`, lézer: `<>`, szellemárnyék: `::`.
 - **Tartalék:** `#define USE_CLS` esetén `system("cls")` + teljes
   újranyomtatás minden képkockán (mindenhol megy, de villog). Ez a megoldás
